@@ -1,0 +1,5 @@
+*.sln
+builds/
+*.exe
+*.obj
+*.pdb
