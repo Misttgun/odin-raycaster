@@ -2,15 +2,18 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:math"
 
-WIDTH :: 512
+WIDTH :: 1024
 HEIGHT :: 512
+FOV :: math.PI / 3
+
 frame_buffer := make([dynamic]u32, WIDTH * HEIGHT)
 
 main :: proc() {
-    // Set the image to red
+    // Set the image to white
     for i in 0..<len(frame_buffer) {
-        frame_buffer[i] = 255
+        frame_buffer[i] = pack_color(255, 255, 255)
     }
 
     map_w := 16
@@ -34,16 +37,11 @@ main :: proc() {
     
     assert(len(game_map) == map_w * map_h)
 
-    for j := 0; j < WIDTH; j += 1 {
-        for i := 0; i < HEIGHT; i += 1 {
-            r : u8 = u8(255 * f32(j) / f32(HEIGHT))
-            g : u8 = u8(255 * f32(i) / f32(WIDTH))
-            b : u8 = 0
-            frame_buffer[i + j * WIDTH] = pack_color(r, g, b)
-        }
-    }
+    player_x : f32 = 3.456 // Player x position
+    player_y : f32 = 2.345 // Player y position
+    player_a : f32 = 1.523 // Player viex direction
 
-    rect_w := WIDTH / map_w
+    rect_w := WIDTH / (map_w * 2)
     rect_h := HEIGHT / map_h
 
     for j := 0; j < map_h; j += 1 {
@@ -54,6 +52,28 @@ main :: proc() {
             rect_x := i * rect_w
             rect_y := j * rect_h
             draw_rectangle(&frame_buffer, WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, pack_color(0, 255, 255))
+        }
+    }
+
+    // Draw the visibility cone and the "3D" view
+    for i := 0; i < WIDTH / 2; i += 1 {
+        angle := player_a - FOV / 2 + FOV * f32(i) / f32(WIDTH / 2)
+
+        for t : f32 = 0; t < 20; t += 0.05 {
+            cx := player_x + t * math.cos(angle)
+            cy := player_y + t * math.sin(angle)
+            
+            pix_x := int(cx * f32(rect_w))
+            pix_y := int(cy * f32(rect_h))
+
+            frame_buffer[pix_x + pix_y * WIDTH] = pack_color(160, 160, 160) // This draws the visibility cone
+
+            if game_map[int(cx) + int(cy) * map_w] != ' '{ // Our ray touches a wall, so draw the vertical column to create an illusion of 3D
+                column_height := int(f32(HEIGHT) / t)
+                draw_rectangle(&frame_buffer, WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, pack_color(0, 255, 255))
+                break
+            }
+
         }
     }
 
@@ -104,7 +124,10 @@ draw_rectangle :: proc(img : ^[dynamic]u32, img_w: int, img_h: int, x: int, y: i
         for j := 0; j < h; j += 1 {
             cx := x + i
             cy := y + j
-            assert(cx < img_w && cy < img_h)
+            if cx >= img_w || cy >= img_h { // No need to check negative values, (usigned variables)
+                continue
+            }
+
             img[cx + cy * img_w] = color
         }
     }
