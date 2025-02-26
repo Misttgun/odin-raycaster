@@ -27,9 +27,9 @@ main :: proc() {
                 "0     0  1110000"+
                 "0     3        0"+
                 "0   10000      0"+
-                "0   0   11100  0"+
-                "0   0   0      0"+
-                "0   0   1  00000"+
+                "0   3   11100  0"+
+                "5   4   0      0"+
+                "5   4   1  00000"+
                 "0       1      0"+
                 "2       1      0"+
                 "0       0      0"+
@@ -42,13 +42,6 @@ main :: proc() {
     player_x : f32 = 3.456 // Player x position
     player_y : f32 = 2.345 // Player y position
     player_a : f32 = 1.523 // Player view direction
-
-    n_colors :: 10
-    colors : [n_colors]u32
-
-    for i in 0..< n_colors {
-        colors[i] = pack_color(u8(rand.uint32() % 255), u8(rand.uint32() % 255), u8(rand.uint32() % 255))
-    }
 
     wall_tex_size : i32 // Texture dimensions (it is a square)
     wall_tex_cnt : i32 // Number of different textures in the image
@@ -72,10 +65,10 @@ main :: proc() {
             rect_x := i * rect_w
             rect_y := j * rect_h
 
-            i_color := game_map[i + j * map_w] - '0'
-            assert(i_color < n_colors)
+            tex_id := i32(game_map[i + j * map_w] - '0')
+            assert(tex_id < wall_tex_cnt)
 
-            draw_rectangle(frame_buffer[:], WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, colors[i_color])
+            draw_rectangle(frame_buffer[:], WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, wall_tex[tex_id * wall_tex_size]) // The color is taken from the upper left pixel of the texture
         }
     }
 
@@ -93,20 +86,39 @@ main :: proc() {
             frame_buffer[pix_x + pix_y * WIDTH] = pack_color(160, 160, 160) // This draws the visibility cone
 
             if game_map[int(cx) + int(cy) * map_w] != ' '{ // Our ray touches a wall, so draw the vertical column to create an illusion of 3D
-                i_color := game_map[int(cx) + int(cy) * map_w] - '0'
-                assert(i_color < n_colors)
+                tex_id := i32(game_map[int(cx) + int(cy) * map_w] - '0')
+                assert(tex_id < wall_tex_cnt)
 
                 column_height := int(f32(HEIGHT) / (t * math.cos(angle - player_a)))
-                draw_rectangle(frame_buffer[:], WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, colors[i_color])
+
+                hit_x : f32 = cx - math.floor(cx + 0.5) // hit_x and hit_y contain (signed) fractional parts of cx and cy
+                hit_y : f32 = cy - math.floor(cy + 0.5) // They vay between -0.5 and +0.5, and one of them is supposed to be very close to 0
+                x_tex_coord := int(hit_x * f32(wall_tex_size))
+                if math.abs(hit_y) > math.abs(hit_x) { // We need to determine wether we hit a "vertical" or a "horizontal" wall (w.r.t the map)
+                    x_tex_coord = int(hit_y * f32(wall_tex_size))
+                }
+
+                if x_tex_coord < 0 { // Do not forget x_tex_coord can be negative, fix that
+                    x_tex_coord += int(wall_tex_size)
+                }
+
+                assert(x_tex_coord >= 0 && x_tex_coord < int(wall_tex_size))
+
+                column := texture_column(wall_tex[:], int(wall_tex_size), int(wall_tex_cnt), int(tex_id), x_tex_coord, column_height)
+                defer delete(column)
+
+                pix_x = WIDTH / 2 + i
+                for j in 0..<column_height {
+                    pix_y = j + HEIGHT / 2 - column_height / 2
+                    if pix_y < 0 || pix_y >= HEIGHT {
+                        continue
+                    }
+
+                    frame_buffer[pix_x + pix_y * WIDTH] = column[j]
+                }
+
                 break
             }
-        }
-    }
-
-    tex_id :: 4
-    for i in 0..<wall_tex_size {
-        for j in 0..<wall_tex_size {
-            frame_buffer[i + j * WIDTH] = wall_tex[i + tex_id * wall_tex_size + j * wall_tex_size * wall_tex_cnt]
         }
     }
 
@@ -201,4 +213,20 @@ load_texture :: proc(filename : cstring, tex_size : ^i32, tex_cnt : ^i32) -> (bo
     }
 
     return true, texture
+}
+
+texture_column :: proc(img : []u32, tex_size , n_textures, tex_id, tex_coord, column_height: int) -> [dynamic]u32 {
+    img_w := tex_size * n_textures
+    img_h := tex_size
+
+    assert(len(img) == img_w * img_h && tex_coord < tex_size && tex_id < n_textures)
+
+    column := make([dynamic]u32, column_height)
+    for y in 0..<column_height {
+        pix_x := tex_id * tex_size + tex_coord
+        pix_y := (y * tex_size) / column_height
+        column[y] = img[pix_x + pix_y * img_w]
+    }
+
+    return column
 }
