@@ -4,12 +4,13 @@ import "core:fmt"
 import "core:os"
 import "core:math"
 import "core:math/rand"
+import stbi "vendor:stb/image"
 
 WIDTH :: 1024
 HEIGHT :: 512
 FOV :: math.PI / 3
 
-frame_buffer := make([dynamic]u32, WIDTH * HEIGHT)
+frame_buffer : [WIDTH * HEIGHT]u32
 
 main :: proc() {
     // Set the image to white
@@ -49,12 +50,22 @@ main :: proc() {
         colors[i] = pack_color(u8(rand.uint32() % 255), u8(rand.uint32() % 255), u8(rand.uint32() % 255))
     }
 
+    wall_tex_size : i32 // Texture dimensions (it is a square)
+    wall_tex_cnt : i32 // Number of different textures in the image
+    is_loaded, wall_tex := load_texture("./assets/walltext.png", &wall_tex_size, &wall_tex_cnt)
+    if is_loaded == false {
+        fmt.eprintln("Failed to load wall textures")
+        return
+    }
+
+    defer delete(wall_tex)
+
     rect_w := WIDTH / (map_w * 2)
     rect_h := HEIGHT / map_h
 
-    for j := 0; j < map_h; j += 1 {
+    for j := 0; j < map_h; j += 1 { // Draw the map
         for i := 0; i < map_w; i += 1 {
-            if game_map[i + j * map_w] == ' '{
+            if game_map[i + j * map_w] == ' '{ // Skip empty spaces
                 continue
             }
 
@@ -64,7 +75,7 @@ main :: proc() {
             i_color := game_map[i + j * map_w] - '0'
             assert(i_color < n_colors)
 
-            draw_rectangle(&frame_buffer, WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, colors[i_color])
+            draw_rectangle(frame_buffer[:], WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, colors[i_color])
         }
     }
 
@@ -86,10 +97,16 @@ main :: proc() {
                 assert(i_color < n_colors)
 
                 column_height := int(f32(HEIGHT) / (t * math.cos(angle - player_a)))
-                draw_rectangle(&frame_buffer, WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, colors[i_color])
+                draw_rectangle(frame_buffer[:], WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, colors[i_color])
                 break
             }
+        }
+    }
 
+    tex_id :: 4
+    for i in 0..<wall_tex_size {
+        for j in 0..<wall_tex_size {
+            frame_buffer[i + j * WIDTH] = wall_tex[i + tex_id * wall_tex_size + j * wall_tex_size * wall_tex_cnt]
         }
     }
 
@@ -133,7 +150,7 @@ drop_ppm_image :: proc(filename: string, image: []u32, w: int, h: int) {
     }
 }
 
-draw_rectangle :: proc(img : ^[dynamic]u32, img_w: int, img_h: int, x: int, y: int, w: int, h: int, color: u32) {
+draw_rectangle :: proc(img : []u32, img_w: int, img_h: int, x: int, y: int, w: int, h: int, color: u32) {
     assert(len(img) == img_w * img_h)
 
     for i := 0; i < w; i += 1 {
@@ -147,4 +164,41 @@ draw_rectangle :: proc(img : ^[dynamic]u32, img_w: int, img_h: int, x: int, y: i
             img[cx + cy * img_w] = color
         }
     }
+}
+
+load_texture :: proc(filename : cstring, tex_size : ^i32, tex_cnt : ^i32) -> (bool, [dynamic]u32) {
+    n_channels : i32 = -1
+    w, h : i32
+    pixmap := stbi.load(filename, &w, &h, &n_channels, 0)
+    defer stbi.image_free(pixmap)
+    if pixmap == nil {
+        fmt.eprintln("Error: can not load the textures")
+        return false, nil
+    }
+
+    if n_channels != 4 {
+        fmt.eprintln("Error: the texture must be a 32 bit image")
+        return false, nil
+    }
+
+    tex_cnt^ = w / h
+    tex_size^ = w / tex_cnt^
+    if w != h * tex_cnt^ {
+        fmt.eprintln("Error: the texture file must contain N square textures packed horizontally")
+        return false, nil
+    }
+
+    texture := make([dynamic]u32, w * h)
+    for j in 0..< h {
+        for i in 0..< w {
+            r : u8 = pixmap[(i + j * w) * 4 + 0]
+            g : u8 = pixmap[(i + j * w) * 4 + 1]
+            b : u8 = pixmap[(i + j * w) * 4 + 2]
+            a : u8 = pixmap[(i + j * w) * 4 + 3]
+            
+            texture[i + j * w] = pack_color(r, g, b, a)
+        }
+    }
+
+    return true, texture
 }
