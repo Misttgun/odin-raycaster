@@ -3,6 +3,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:math"
+import "core:math/rand"
 
 WIDTH :: 1024
 HEIGHT :: 512
@@ -39,7 +40,14 @@ main :: proc() {
 
     player_x : f32 = 3.456 // Player x position
     player_y : f32 = 2.345 // Player y position
-    player_a : f32 = 1.523 // Player viex direction
+    player_a : f32 = 1.523 // Player view direction
+
+    n_colors :: 10
+    colors : [n_colors]u32
+
+    for i in 0..< n_colors {
+        colors[i] = pack_color(u8(rand.uint32() % 255), u8(rand.uint32() % 255), u8(rand.uint32() % 255))
+    }
 
     rect_w := WIDTH / (map_w * 2)
     rect_h := HEIGHT / map_h
@@ -49,9 +57,14 @@ main :: proc() {
             if game_map[i + j * map_w] == ' '{
                 continue
             }
+
             rect_x := i * rect_w
             rect_y := j * rect_h
-            draw_rectangle(&frame_buffer, WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, pack_color(0, 255, 255))
+
+            i_color := game_map[i + j * map_w] - '0'
+            assert(i_color < n_colors)
+
+            draw_rectangle(&frame_buffer, WIDTH, HEIGHT, rect_x, rect_y, rect_w, rect_h, colors[i_color])
         }
     }
 
@@ -59,7 +72,7 @@ main :: proc() {
     for i := 0; i < WIDTH / 2; i += 1 {
         angle := player_a - FOV / 2 + FOV * f32(i) / f32(WIDTH / 2)
 
-        for t : f32 = 0; t < 20; t += 0.05 {
+        for t : f32 = 0; t < 20; t += 0.01 {
             cx := player_x + t * math.cos(angle)
             cy := player_y + t * math.sin(angle)
             
@@ -69,8 +82,11 @@ main :: proc() {
             frame_buffer[pix_x + pix_y * WIDTH] = pack_color(160, 160, 160) // This draws the visibility cone
 
             if game_map[int(cx) + int(cy) * map_w] != ' '{ // Our ray touches a wall, so draw the vertical column to create an illusion of 3D
-                column_height := int(f32(HEIGHT) / t)
-                draw_rectangle(&frame_buffer, WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, pack_color(0, 255, 255))
+                i_color := game_map[int(cx) + int(cy) * map_w] - '0'
+                assert(i_color < n_colors)
+
+                column_height := int(f32(HEIGHT) / t * math.cos(angle - player_a))
+                draw_rectangle(&frame_buffer, WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, colors[i_color])
                 break
             }
 
@@ -124,7 +140,7 @@ draw_rectangle :: proc(img : ^[dynamic]u32, img_w: int, img_h: int, x: int, y: i
         for j := 0; j < h; j += 1 {
             cx := x + i
             cy := y + j
-            if cx >= img_w || cy >= img_h { // No need to check negative values, (usigned variables)
+            if cx >= img_w || cy >= img_h { // No need to check for negative values, (usigned variables)
                 continue
             }
 
