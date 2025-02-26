@@ -85,7 +85,7 @@ main :: proc() {
                 i_color := game_map[int(cx) + int(cy) * map_w] - '0'
                 assert(i_color < n_colors)
 
-                column_height := int(f32(HEIGHT) / t * math.cos(angle - player_a))
+                column_height := int(f32(HEIGHT) / (t * math.cos(angle - player_a)))
                 draw_rectangle(&frame_buffer, WIDTH, HEIGHT, WIDTH / 2 + i, HEIGHT / 2 - column_height / 2, 1, column_height, colors[i_color])
                 break
             }
