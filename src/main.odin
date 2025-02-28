@@ -2,11 +2,26 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:slice"
+import "core:time"
+
+import SDL "vendor:sdl2"
+
+should_quit := false
+
+Player :: struct {
+    x : f32, // Position
+    y : f32,
+    a : f32, // View direction
+    fov : f32, // Field of view
+    turn : i32,
+    walk : i32,
+}
 
 main :: proc() {
-    m_player := player{x = 3.456, y = 2.345, a = 1.523, fov = math.PI / 3}
+    player := Player{x = 3.456, y = 2.345, a = 1.523, fov = math.PI / 3}
 
-    tex_walls : texture
+    tex_walls : Texture
     texture_init("./assets/walltext.png", &tex_walls)
     defer delete(tex_walls.img)
 
@@ -15,83 +30,102 @@ main :: proc() {
         return
     }
 
-    render(m_player, tex_walls)
-    drop_ppm_image("./bin/out.ppm", frame_buffer[:], WIDTH, HEIGHT)
+    tex_monster : Texture
+    texture_init("./assets/monsters.png", &tex_monster)
+    defer delete(tex_monster.img)
 
+    if tex_monster.count == 0 {
+        fmt.eprintln("Failed to load monster textures")
+        return
+    }
+
+    sprites : [5]Sprite = {
+        {3.523, 3.812, 2, 0},
+        {1.834, 8.765, 0, 0},
+        {5.323, 5.365, 1, 0},
+        {14.32, 13.36, 3, 0},
+        {4.123, 10.76, 1, 0}
+    }
+
+    assert(SDL.Init({.VIDEO}) == 0, SDL.GetErrorString())
+    defer SDL.Quit()
+
+    window : ^SDL.Window
+    renderer : ^SDL.Renderer
+    SDL.CreateWindowAndRenderer(i32(WIDTH), i32(HEIGHT), SDL.WINDOW_SHOWN | SDL.WINDOW_INPUT_FOCUS, &window, &renderer)
+    defer SDL.DestroyWindow(window)
+    defer SDL.DestroyRenderer(renderer)
+
+    frame_buffer_texture := SDL.CreateTexture(renderer, .ABGR8888, .STREAMING, i32(WIDTH), i32(HEIGHT))
+    defer SDL.DestroyTexture(frame_buffer_texture)
+
+    timer_init(60)
+    input_init()
+
+    for should_quit == false {
+        timer_update()
+
+        event : SDL.Event
+        for SDL.PollEvent(&event) {
+            if event.type == .QUIT {
+                should_quit = true
+            }
+        }
+
+        input_update()
+        handle_input(&player)
+        player_update(&player, delta_time)
+
+        for i in 0..<len(sprites) {
+            sprites[i].player_dist = math.sqrt(math.pow(player.x - sprites[i].x, 2) + math.pow(player.y - sprites[i].y, 2)) // Distance from the player to the sprite
+        }
+    
+        slice.sort_by(sprites[:], sprite_less) // Sort it from farthest to closest
+
+        render(player, sprites[:], tex_walls, tex_monster)
+
+        SDL.UpdateTexture(frame_buffer_texture, nil, raw_data(&frame_buffer), i32(WIDTH * 4))
+
+        SDL.RenderClear(renderer)
+        SDL.RenderCopy(renderer, frame_buffer_texture, nil, nil)
+        SDL.RenderPresent(renderer)
+
+        timer_update_late()
+    }
 }
 
-wall_x_texcoord :: proc(x, y : f32, tex_walls : texture) -> i32 {
-    hit_x : f32 = x - math.floor(x + 0.5) // hit_x and hit_y contain (signed) fractional parts of cx and cy
-    hit_y : f32 = y - math.floor(y + 0.5) // They vay between -0.5 and +0.5, and one of them is supposed to be very close to 0
-    tex_coord := i32(hit_x * f32(tex_walls.size))
-
-    // We need to determine wether we hit a "vertical" or a "horizontal" wall (w.r.t the map)
-    if math.abs(hit_y) > math.abs(hit_x) {
-        tex_coord = i32(hit_y * f32(tex_walls.size))
+handle_input :: proc(player : ^Player){
+    if input_state.escape == .PRESSED {
+        should_quit = true
     }
 
-    // Do not forget x_tex_coord can be negative, fix that
-    if tex_coord < 0 {
-        tex_coord += tex_walls.size
+    player.turn = 0
+    player.walk = 0
+
+    if input_state.left == .PRESSED || input_state.left == .HELD {
+        player.turn = -1
     }
 
-    assert(tex_coord >= 0 && tex_coord < tex_walls.size)
+    if input_state.right == .PRESSED || input_state.right == .HELD {
+        player.turn = 1
+    }
 
-    return tex_coord
+    if input_state.up == .PRESSED || input_state.up == .HELD {
+        player.walk = 1
+    }
+
+    if input_state.down == .PRESSED || input_state.down == .HELD {
+        player.walk = -1
+    }
 }
 
-render :: proc(player_t : player, tex_walls : texture) {
-    clear(pack_color(255, 255, 255)) // Clear the screen
+player_update :: proc(player : ^Player, dt : f32) {
+    player.a += f32(player.turn) * dt
+    nx := player.x + f32(player.walk) * math.cos(player.a) * dt
+    ny := player.y + f32(player.walk) * math.sin(player.a) * dt
 
-    rect_w := WIDTH / (map_w * 2)
-    rect_h := HEIGHT / map_h
-
-    for j := 0; j < map_h; j += 1 { // Draw the map
-        for i := 0; i < map_w; i += 1 {
-            if map_is_empty(i, j){ // Skip empty spaces
-                continue
-            }
-
-            rect_x := i * rect_w
-            rect_y := j * rect_h
-            tex_id := map_get(i, j)
-            assert(tex_id < tex_walls.count)
-
-            draw_rectangle(rect_x, rect_y, rect_w, rect_h, tex_walls.img[tex_id * tex_walls.size]) // The color is taken from the upper left pixel of the texture
-        }
-    }
-
-    // Draw the visibility cone and the "3D" view
-    for i := 0; i < WIDTH / 2; i += 1 {
-        angle := player_t.a - player_t.fov / 2 + player_t.fov * f32(i) / f32(WIDTH / 2)
-
-        for t : f32 = 0; t < 20; t += 0.01 {
-            x := player_t.x + t * math.cos(angle)
-            y := player_t.y + t * math.sin(angle)
-
-            set_pixel(int(x * f32(rect_w)), int(y * f32(rect_h)), pack_color(160, 160, 160)) // This draws the visibility cone
-
-            if map_is_empty(int(x), int(y)) { 
-                continue
-            }
-                
-            tex_id := map_get(int(x), int(y)) // Our ray touches a wall, so draw the vertical column to create an illusion of 3D
-            assert(tex_id < tex_walls.count)
-
-            column_height := i32(f32(HEIGHT) / (t * math.cos(angle - player_t.a)))
-            x_texcoord := wall_x_texcoord(x, y, tex_walls)
-            
-            column := texture_get_scaled_column(tex_walls, tex_id, x_texcoord, column_height)
-            defer delete(column)
-
-            pix_x := i + WIDTH / 2
-            for j in 0..<column_height {
-                pix_y := int(j + HEIGHT / 2 - column_height / 2)
-                if pix_y >= 0 && pix_y < HEIGHT {
-                    set_pixel(pix_x, pix_y, column[j])
-                }
-            }
-            break
-        }
+    if int(nx) >= 0 && int(nx) < map_w && int(ny) >= 0 && int(ny) < map_h {
+        if map_is_empty(int(nx), int(player.y)) do player.x = nx
+        if map_is_empty(int(player.x), int(ny)) do player.y = ny
     }
 }

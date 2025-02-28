@@ -3,7 +3,8 @@ package main
 import "core:fmt"
 import stbi "vendor:stb/image"
 
-texture :: struct {
+
+Texture :: struct {
     img_w: i32, // Overall image dimensions
     img_h: i32,
     count: i32, // Number of textures and size in pixels
@@ -11,7 +12,14 @@ texture :: struct {
     img: [dynamic]u32 // Textures storage container
 }
 
-texture_init :: proc(filename: cstring, tex: ^texture){
+Sprite :: struct {
+    x : f32,
+    y : f32,
+    tex_id : i32,
+    player_dist : f32,
+}
+
+texture_init :: proc(filename: cstring, texture: ^Texture){
     n_channels : i32 = -1
     w, h : i32
     pixmap := stbi.load(filename, &w, &h, &n_channels, 0)
@@ -32,12 +40,12 @@ texture_init :: proc(filename: cstring, tex: ^texture){
         return
     }
 
-    tex.count = w / h
-    tex.size = w / tex.count
-    tex.img_w = w
-    tex.img_h = h
+    texture.count = w / h
+    texture.size = w / texture.count
+    texture.img_w = w
+    texture.img_h = h
 
-    tex.img = make([dynamic]u32, w * h)
+    texture.img = make([dynamic]u32, w * h)
     for j in 0..< h {
         for i in 0..< w {
             r : u8 = pixmap[(i + j * w) * 4 + 0]
@@ -45,23 +53,27 @@ texture_init :: proc(filename: cstring, tex: ^texture){
             b : u8 = pixmap[(i + j * w) * 4 + 2]
             a : u8 = pixmap[(i + j * w) * 4 + 3]
             
-            tex.img[i + j * w] = pack_color(r, g, b, a)
+            texture.img[i + j * w] = pack_color(r, g, b, a)
         }
     }
 }
 
-texture_get :: proc(tex : texture, i, j, idx : i32)-> u32 {
-    assert(i < tex.size && j < tex.size && idx < tex.count)
-    return tex.img[i + idx * tex.size + j * tex.img_w]
+texture_get :: proc(texture : Texture, i, j, idx : i32)-> u32 {
+    assert(i < texture.size && j < texture.size && idx < texture.count)
+    return texture.img[i + idx * texture.size + j * texture.img_w]
 }
 
-texture_get_scaled_column :: proc(tex : texture, texture_id, texcoord, column_height : i32) -> [dynamic]u32 {
-    assert(texcoord < tex.size && texture_id < tex.count)
+texture_get_scaled_column :: proc(texture : Texture, texture_id, texcoord, column_height : i32) -> [dynamic]u32 {
+    assert(texcoord < texture.size && texture_id < texture.count)
 
     column := make([dynamic]u32, column_height)
     for y in 0..<column_height {
-        column[y] = texture_get(tex, texcoord, (y * tex.size) / column_height, texture_id)
+        column[y] = texture_get(texture, texcoord, (y * texture.size) / column_height, texture_id)
     }
 
     return column
+}
+
+sprite_less :: proc(a, b : Sprite) -> bool {
+    return a.player_dist > b.player_dist
 }

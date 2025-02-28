@@ -12,7 +12,7 @@ unpack_color :: proc(color: u32) -> (r: u8, g: u8, b:u8, a:u8) {
     r = u8((color >> 0)  & 0xFF)
     g = u8((color >> 8)  & 0xFF)
     b = u8((color >> 16) & 0xFF)
-    a = u8((color >> 32) & 0xFF)
+    a = u8((color >> 24) & 0xFF)
     return
 }
 
